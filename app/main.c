@@ -1,74 +1,84 @@
-/*
- * Copyright (C) 2014 Philipp Rosenkranz
- * Copyright (C) 2014 Nico von Geyso
- *
- * This file is subject to the terms and conditions of the GNU Lesser
- * General Public License v2.1. See the file LICENSE in the top level
- * directory for more details.
+#include <stdio.h>
+#include <string.h>
+#include "od.h"
+#include "aes.h"
+
+static aes_context AesContext;
+
+/*!
+ * Encryption aBlock and sBlock
  */
+static uint8_t aBlock[] = { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                          };
+static uint8_t sBlock[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                          };
 
-#include "tests-crypto.h"
-
-int test(void)
+void kl_aes_encrypt( const uint8_t *buffer, uint16_t size, const uint8_t *key, uint8_t *encBuffer )
 {
-    TESTS_START();
-    TESTS_RUN(tests_crypto_helper_tests());
-    TESTS_RUN(tests_crypto_chacha_tests());
-    TESTS_RUN(tests_crypto_poly1305_tests());
-    TESTS_RUN(tests_crypto_chacha20poly1305_tests());
-    TESTS_RUN(tests_crypto_aes_tests());
-    TESTS_RUN(tests_crypto_cipher_tests());
-    TESTS_RUN(tests_crypto_modes_ccm_tests());
-    TESTS_RUN(tests_crypto_modes_ocb_tests());
-    TESTS_RUN(tests_crypto_modes_ecb_tests());
-    TESTS_RUN(tests_crypto_modes_cbc_tests());
-    TESTS_RUN(tests_crypto_modes_ctr_tests());
-    TESTS_END();
-    return 0;
+    uint16_t i;
+    uint8_t bufferIndex = 0;
+    uint16_t ctr = 1;
+
+    memset( AesContext.ksch, '\0', 240 );
+    aes_set_key( key, 16, &AesContext );
+
+    while( size >= 16 )
+    {
+        aBlock[15] = ( ( ctr ) & 0xFF );
+        ctr++;
+        aes_encrypt( aBlock, sBlock, &AesContext );
+        for( i = 0; i < 16; i++ )
+        {
+            encBuffer[bufferIndex + i] = buffer[bufferIndex + i] ^ sBlock[i];
+        }
+        size -= 16;
+        bufferIndex += 16;
+    }
+
+    if( size > 0 )
+    {
+        aBlock[15] = ( ( ctr ) & 0xFF );
+        aes_encrypt( aBlock, sBlock, &AesContext );
+        for( i = 0; i < size; i++ )
+        {
+            encBuffer[bufferIndex + i] = buffer[bufferIndex + i] ^ sBlock[i];
+        }
+    }
 }
 
+void kl_aes_decrypt( const uint8_t *buffer, uint16_t size, const uint8_t *key, uint8_t *decBuffer )
+{
+    kl_aes_encrypt(buffer, size, key, decBuffer);
+}
 
-#include "crypto/aes.h"
-
-static uint8_t TEST_0_KEY[] = {
-    0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
-    0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF
+static uint8_t Key[] =
+{
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-static uint8_t TEST_0_INP[] = {
+static uint8_t en_in_data[] = {
+    0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
     0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
-    0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
+    0x11,0x12,0x13
 };
 
+uint8_t en_out_data[20];
+uint8_t de_out_data[20];
 
 int main(void)
 {
-    cipher_context_t ctx;
+    uint32_t len = sizeof(en_in_data);
 
-    int err;
-    uint8_t data_encrypted[AES_BLOCK_SIZE] = {0};
-    uint8_t data_decrypted[AES_BLOCK_SIZE] = {0};
+    kl_aes_encrypt(en_in_data, len, Key, en_out_data);
+    printf("encrypt :\r\n");
+    od_hex_dump(en_out_data, len, 0);
 
-    err = aes_init(&ctx, TEST_0_KEY, sizeof(TEST_0_KEY));
-
-    err = aes_encrypt(&ctx, TEST_0_INP, data_encrypted);
-
-    printf("after encrypt err is %d data is :\r\n", err);
-    for (int i = 0; i < AES_BLOCK_SIZE; i++)
-    {
-        printf("%02x ", data_encrypted[i]);
-    }
-    printf("\r\n");
-
-
-    err = aes_decrypt(&ctx, data_encrypted, data_decrypted);
-
-      printf("after decrypt err is %d data is :\r\n", err);
-    for (int i = 0; i < AES_BLOCK_SIZE; i++)
-    {
-        printf("%02x ", data_decrypted[i]);
-    }
-    printf("\r\n");
+    kl_aes_decrypt(en_out_data, len, Key, de_out_data);
+    printf("decrypt :\r\n");
+    od_hex_dump(de_out_data, len, 0);
 
     return 0;
 }
